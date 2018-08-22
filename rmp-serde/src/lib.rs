@@ -62,14 +62,20 @@
 
 #![warn(missing_debug_implementations, missing_docs)]
 
+#![no_std]
 extern crate rmp;
 extern crate byteorder;
 #[macro_use]
 extern crate serde;
 
+extern crate sgx_tstd as std;
+
 use std::fmt::{self, Display, Formatter};
 use std::mem;
 use std::str::{self, Utf8Error};
+
+use std::string::{ToString, String};
+use std::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 use serde::de;

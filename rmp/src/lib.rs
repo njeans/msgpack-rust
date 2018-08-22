@@ -148,8 +148,12 @@
 //!
 //! [read_int]: decode/fn.read_int.html
 
+#![no_std]
+
 extern crate byteorder;
 extern crate num_traits;
+extern crate sgx_tstd as std;
+
 
 mod marker;
 pub mod encode;

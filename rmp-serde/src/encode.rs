@@ -4,6 +4,9 @@ use std::error;
 use std::fmt::{self, Display};
 use std::io::Write;
 
+use std::string::{ToString, String};
+use std::vec::Vec;
+
 use serde;
 use serde::Serialize;
 use serde::ser::{SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,

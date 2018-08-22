@@ -5,6 +5,9 @@ use std::fmt::{self, Display, Formatter};
 use std::io::{self, Cursor, ErrorKind, Read};
 use std::str::{self, Utf8Error};
 
+use std::string::{ToString, String};
+use std::vec::Vec;
+
 use byteorder::{self, ReadBytesExt};
 
 use serde;
