@@ -11,9 +11,9 @@ keywords = ["msgpack", "MessagePack"]
 categories = ["encoding"]
 
 [dependencies]
-byteorder = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
-num-traits = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
-sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
+byteorder = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
+num-traits = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
+sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
 
 
 [dev-dependencies]

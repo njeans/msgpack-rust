@@ -11,11 +11,11 @@ keywords = ["msgpack", "MessagePack", "serde", "serialization"]
 categories = ["encoding"]
 
 [dependencies]
-byteorder = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
-serde = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
+byteorder = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
+serde = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
 rmp = { path = "../rmp" }
 
-sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.0" }
+sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.4" }
 
 [dev-dependencies]
 serde_bytes = "0.10"
