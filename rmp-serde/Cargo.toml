@@ -11,11 +11,11 @@ keywords = ["msgpack", "MessagePack", "serde", "serialization"]
 categories = ["encoding"]
 
 [dependencies]
-byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "70965e6bda25f6b77f968684e20b902dc2162a9c" }
-serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", rev = "enigma-1.0.8" }
+byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "88b0f98667bfcf4dc9445fabbeea8c269754b35b" }
+serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", rev = "81f47e78242de4fcccafbeb78d5250616a85c7c4" }
 rmp = { path = "../rmp" }
 
-sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.8" }
+sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
 
 [dev-dependencies]
 serde_bytes = "0.10"

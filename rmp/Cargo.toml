@@ -11,9 +11,9 @@ keywords = ["msgpack", "MessagePack"]
 categories = ["encoding"]
 
 [dependencies]
-byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "70965e6bda25f6b77f968684e20b902dc2162a9c" }
-num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx", rev = "4fe7ee21ef259c63b79b66b630226957c0e1ae57" }
-sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.8" }
+byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "88b0f98667bfcf4dc9445fabbeea8c269754b35b" }
+num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx", rev = "fac37c7085a8da778c7dd7a9b50bff1474112ecc" }
+sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
 
 
 [dev-dependencies]
