@@ -12,7 +12,7 @@ categories = ["encoding"]
 
 [dependencies]
 byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "88b0f98667bfcf4dc9445fabbeea8c269754b35b" }
-num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx", rev = "fac37c7085a8da778c7dd7a9b50bff1474112ecc" }
+num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx", rev = "c9e52ddeff3cb517c8d595bf22e22865dfbe3318" }
 sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
 
 
