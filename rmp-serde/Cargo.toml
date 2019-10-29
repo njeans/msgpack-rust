@@ -12,7 +12,7 @@ categories = ["encoding"]
 
 [dependencies]
 byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "sgx_1.0.9" }
-serde = { git = "https://github.com/mesalock-linux/serde-sgx.git" }
+serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", rev = "sgx_1.0.9" }
 rmp = { path = "../rmp" }
 
 sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
