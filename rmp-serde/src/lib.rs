@@ -61,11 +61,11 @@
 //! [serde]: https://serde.rs/
 
 #![warn(missing_debug_implementations, missing_docs)]
+#[no_std]
+extern crate std as std;
 
 #[macro_use]
 extern crate serde;
-
-extern crate sgx_tstd as std;
 
 use std::fmt::{self, Display, Formatter};
 use std::mem;

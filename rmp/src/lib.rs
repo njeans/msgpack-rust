@@ -148,6 +148,9 @@
 //!
 //! [read_int]: decode/fn.read_int.html
 
+#[no_std]
+extern crate std as std;
+
 pub mod decode;
 pub mod encode;
 mod marker;
