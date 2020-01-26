@@ -1,9 +1,6 @@
-extern crate serde;
-extern crate serde_bytes;
 #[macro_use]
 extern crate serde_derive;
 extern crate rmp_serde as rmps;
-extern crate rmpv;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -11,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use serde_bytes::{Bytes, ByteBuf};
 
-use rmps::Serializer;
+use crate::rmps::Serializer;
 use rmpv::Value;
 use rmpv::encode;
 use rmpv::ext::to_value;
@@ -248,4 +245,16 @@ fn pass_enum_to_value() {
         to_value(Enum::Tuple("John".into(), 42)).unwrap());
     assert_eq!(Value::Array(vec![Value::from(3), Value::Array(vec![Value::from("John"), Value::from(42)])]),
         to_value(Enum::Struct { name: "John".into(), age: 42 }).unwrap());
+}
+
+#[test]
+fn pass_ext_struct_to_value() {
+    use serde_bytes::ByteBuf;
+
+    #[derive(Debug, PartialEq, Serialize)]
+    #[serde(rename = "_ExtStruct")]
+    struct ExtStruct((i8, ByteBuf));
+
+    assert_eq!(Value::Ext(5, vec![10]),
+        to_value(ExtStruct((5, ByteBuf::from(vec![10])))).unwrap());
 }

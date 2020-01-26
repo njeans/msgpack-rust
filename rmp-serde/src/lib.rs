@@ -26,7 +26,7 @@
 //!
 //! To be able to serialize a piece of data, it must implement the `serde::Serialize` trait. To be
 //! able to deserialize a piece of data, it must implement the `serde::Deserialize` trait. Serde
-//! provides provides an annotation to automatically generate the code for these
+//! provides an annotation to automatically generate the code for these
 //! traits: `#[derive(Serialize, Deserialize)]`.
 //!
 //! # Examples
@@ -62,9 +62,6 @@
 
 #![warn(missing_debug_implementations, missing_docs)]
 
-#![no_std]
-extern crate rmp;
-extern crate byteorder;
 #[macro_use]
 extern crate serde;
 
@@ -80,12 +77,27 @@ use std::vec::Vec;
 use serde::{Deserialize, Serialize};
 use serde::de;
 
-pub use decode::{Deserializer, from_read, from_read_ref, from_slice};
-pub use encode::{Serializer, to_vec, to_vec_named};
+pub use crate::decode::{Deserializer, from_read, from_read_ref, from_slice};
+pub use crate::encode::{Serializer, to_vec, to_vec_named};
 
+pub mod config;
 pub mod decode;
 pub mod encode;
-pub mod ext;
+
+/// Name of Serde newtype struct to Represent Msgpack's Ext
+/// Msgpack Ext: Ext(tag, binary)
+/// Serde data model: _ExtStruct((tag, binary))
+/// Example Serde impl for custom type:
+///
+/// ```ignore
+/// #[derive(Debug, PartialEq, Serialize, Deserialize)]
+/// #[serde(rename = "_ExtStruct")]
+/// struct ExtStruct((i8, serde_bytes::ByteBuf));
+///
+/// test_round(ExtStruct((2, serde_bytes::ByteBuf::from(vec![5]))),
+///            Value::Ext(2, vec![5]));
+/// ```
+pub const MSGPACK_EXT_STRUCT_NAME: &str = "_ExtStruct";
 
 /// Helper that allows both to encode and decode strings no matter whether they contain valid or
 /// invalid UTF-8.
@@ -183,7 +195,7 @@ struct RawVisitor;
 impl<'de> de::Visitor<'de> for RawVisitor {
     type Value = Raw;
 
-    fn expecting(&self, fmt: &mut Formatter) -> Result<(), fmt::Error> {
+    fn expecting(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         "string or bytes".fmt(fmt)
     }
 
@@ -208,7 +220,7 @@ impl<'de> de::Visitor<'de> for RawVisitor {
             Err(err) => Err((v.into(), err)),
         };
 
-        Ok(Raw { s: s })
+        Ok(Raw { s })
     }
 
     #[inline]
@@ -223,7 +235,7 @@ impl<'de> de::Visitor<'de> for RawVisitor {
             }
         };
 
-        Ok(Raw { s: s })
+        Ok(Raw { s })
     }
 }
 
@@ -318,7 +330,7 @@ struct RawRefVisitor;
 impl<'de> de::Visitor<'de> for RawRefVisitor {
     type Value = RawRef<'de>;
 
-    fn expecting(&self, fmt: &mut Formatter) -> Result<(), fmt::Error> {
+    fn expecting(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         "string or bytes".fmt(fmt)
     }
 
@@ -338,7 +350,7 @@ impl<'de> de::Visitor<'de> for RawRefVisitor {
             Err(err) => Err((v, err)),
         };
 
-        Ok(RawRef { s: s })
+        Ok(RawRef { s })
     }
 }
 

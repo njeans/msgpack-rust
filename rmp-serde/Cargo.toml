@@ -9,6 +9,7 @@ documentation = "https://docs.rs/rmp-serde"
 readme = "../README.md"
 keywords = ["msgpack", "MessagePack", "serde", "serialization"]
 categories = ["encoding"]
+edition = "2018"
 
 [dependencies]
 byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "sgx_1.0.9" }
@@ -18,5 +19,5 @@ rmp = { path = "../rmp" }
 sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
 
 [dev-dependencies]
-serde_bytes = "0.10"
-serde_derive = "1"
+serde_bytes = "0.11.2"
+serde_derive = "1.0.99"

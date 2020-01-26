@@ -1,6 +1,6 @@
 [package]
 name = "rmp"
-version = "0.8.7"
+version = "0.8.9"
 authors = ["Evgeny Safronov <division494@gmail.com>"]
 license = "MIT"
 description = "Pure Rust MessagePack serialization implementation"
@@ -9,6 +9,7 @@ documentation = "https://docs.rs/rmp"
 readme = "README.md"
 keywords = ["msgpack", "MessagePack"]
 categories = ["encoding"]
+edition = "2018"
 
 [dependencies]
 byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx", rev = "sgx_1.0.9" }
@@ -17,4 +18,4 @@ sgx_tstd = { git = "https://github.com/baidu/rust-sgx-sdk.git", rev = "v1.0.9" }
 
 
 [dev-dependencies]
-quickcheck = "0.3"
+quickcheck = "0.9"

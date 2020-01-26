@@ -3,7 +3,7 @@ use std::fmt::{self, Display, Formatter};
 
 use serde::de::Unexpected;
 
-use {Integer, IntPriv, Value, ValueRef};
+use crate::{Integer, IntPriv, Value, ValueRef};
 
 pub use self::de::{deserialize_from, from_value, EnumRefDeserializer};
 pub use self::se::to_value;
@@ -17,31 +17,22 @@ pub enum Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
-            Error::Syntax(ref err) => write!(fmt, "{}: {}", error::Error::description(self), err)
+            Error::Syntax(ref err) => write!(fmt, "error while decoding value: {}", err)
         }
     }
 }
 
 impl error::Error for Error {
-    fn description(&self) -> &str {
-        "error while decoding value"
-    }
-
-    fn cause(&self) -> Option<&error::Error> {
-        match *self {
-            Error::Syntax(..) => None,
-        }
-    }
 }
 
 trait ValueExt {
-    fn unexpected(&self) -> Unexpected;
+    fn unexpected(&self) -> Unexpected<'_>;
 }
 
 impl ValueExt for Value {
-    fn unexpected(&self) -> Unexpected {
+    fn unexpected(&self) -> Unexpected<'_> {
         match *self {
             Value::Nil => Unexpected::Unit,
             Value::Boolean(v) => Unexpected::Bool(v),
@@ -68,7 +59,7 @@ impl ValueExt for Value {
 }
 
 impl<'a> ValueExt for ValueRef<'a> {
-    fn unexpected(&self) -> Unexpected {
+    fn unexpected(&self) -> Unexpected<'_> {
         match *self {
             ValueRef::Nil => Unexpected::Unit,
             ValueRef::Boolean(v) => Unexpected::Bool(v),
