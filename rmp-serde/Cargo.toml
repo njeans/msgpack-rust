@@ -12,11 +12,11 @@ categories = ["encoding"]
 edition = "2018"
 
 [dependencies]
-byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx.git", rev = "sgx_1.1.0" }
-serde = { git = "https://github.com/mesalock-linux/serde-sgx.git", rev = "sgx_1.1.0" }
+byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx.git"}
+serde = { git = "https://github.com/mesalock-linux/serde-sgx.git"}
 rmp = { path = "../rmp" }
 
-std = { package = "sgx_tstd", git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.0" }
+std = { package = "sgx_tstd", git = "https://github.com/apache/teaclave-sgx-sdk.git" }
 
 [dev-dependencies]
 serde_bytes = "0.11.2"

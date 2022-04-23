@@ -12,9 +12,9 @@ categories = ["encoding"]
 edition = "2018"
 
 [dependencies]
-byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx.git", rev = "sgx_1.1.0" }
-num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx.git", rev = "sgx_1.1.0" }
-std = { package = "sgx_tstd", git = "https://github.com/apache/teaclave-sgx-sdk.git", rev = "v1.1.0" }
+byteorder = { git = "https://github.com/mesalock-linux/byteorder-sgx.git" }
+num-traits = { git = "https://github.com/mesalock-linux/num-traits-sgx.git" }
+std = { package = "sgx_tstd", git = "https://github.com/apache/teaclave-sgx-sdk.git"}
 
 [dev-dependencies]
 #quickcheck = "0.9"
