@@ -8,15 +8,13 @@
 #[cfg(feature = "with-serde")]
 #[macro_use]
 extern crate serde;
-#[cfg(feature = "with-serde")]
-extern crate serde_bytes;
-extern crate rmp;
-extern crate num_traits;
 
 use std::borrow::Cow;
 use std::fmt::{self, Debug, Display};
 use std::ops::Index;
 use std::str::Utf8Error;
+use std::iter::FromIterator;
+use std::convert::TryFrom;
 
 use num_traits::NumCast;
 
@@ -33,6 +31,21 @@ enum IntPriv {
     /// Always less than zero.
     NegInt(i64),
 }
+
+/// Name of Serde newtype struct to Represent Msgpack's Ext
+/// Msgpack Ext: Ext(tag, binary)
+/// Serde data model: _ExtStruct((tag, binary))
+/// Example Serde impl for custom type:
+///
+/// ```ignore
+/// #[derive(Debug, PartialEq, Serialize, Deserialize)]
+/// #[serde(rename = "_ExtStruct")]
+/// struct ExtStruct((i8, serde_bytes::ByteBuf));
+///
+/// test_round(ExtStruct((2, serde_bytes::ByteBuf::from(vec![5]))),
+///            Value::Ext(2, vec![5]));
+/// ```
+pub const MSGPACK_EXT_STRUCT_NAME: &str = "_ExtStruct";
 
 /// Represents a MessagePack integer, whether signed or unsigned.
 ///
@@ -90,13 +103,13 @@ impl Integer {
 }
 
 impl Debug for Integer {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         Debug::fmt(&self.n, fmt)
     }
 }
 
 impl Display for Integer {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self.n {
             IntPriv::PosInt(v) => Display::fmt(&v, fmt),
             IntPriv::NegInt(v) => Display::fmt(&v, fmt),
@@ -250,7 +263,7 @@ impl Utf8String {
         }
     }
 
-    pub fn as_ref(&self) -> Utf8StringRef {
+    pub fn as_ref(&self) -> Utf8StringRef<'_> {
         match self.s {
             Ok(ref s) => Utf8StringRef { s: Ok(s.as_str()) },
             Err((ref buf, err)) => Utf8StringRef { s: Err((&buf[..], err)) },
@@ -259,7 +272,7 @@ impl Utf8String {
 }
 
 impl Display for Utf8String {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self.s {
             Ok(ref s) => write!(fmt, "\"{}\"", s),
             Err(ref err) => Debug::fmt(&err.0, fmt),
@@ -348,7 +361,7 @@ impl<'a> Utf8StringRef<'a> {
 }
 
 impl<'a> Display for Utf8StringRef<'a> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self.s {
             Ok(ref s) => write!(fmt, "\"{}\"", s),
             Err(ref err) => Debug::fmt(&err.0, fmt),
@@ -445,22 +458,22 @@ impl Value {
     ///
     /// assert_eq!(expected, val.as_ref());
     /// ```
-    pub fn as_ref(&self) -> ValueRef {
-        match self {
-            &Value::Nil => ValueRef::Nil,
-            &Value::Boolean(val) => ValueRef::Boolean(val),
-            &Value::Integer(val) => ValueRef::Integer(val),
-            &Value::F32(val) => ValueRef::F32(val),
-            &Value::F64(val) => ValueRef::F64(val),
-            &Value::String(ref val) => ValueRef::String(val.as_ref()),
-            &Value::Binary(ref val) => ValueRef::Binary(val.as_slice()),
-            &Value::Array(ref val) => {
+    pub fn as_ref(&self) -> ValueRef<'_> {
+        match *self {
+            Value::Nil => ValueRef::Nil,
+            Value::Boolean(val) => ValueRef::Boolean(val),
+            Value::Integer(val) => ValueRef::Integer(val),
+            Value::F32(val) => ValueRef::F32(val),
+            Value::F64(val) => ValueRef::F64(val),
+            Value::String(ref val) => ValueRef::String(val.as_ref()),
+            Value::Binary(ref val) => ValueRef::Binary(val.as_slice()),
+            Value::Array(ref val) => {
                 ValueRef::Array(val.iter().map(|v| v.as_ref()).collect())
             }
-            &Value::Map(ref val) => {
+            Value::Map(ref val) => {
                 ValueRef::Map(val.iter().map(|&(ref k, ref v)| (k.as_ref(), v.as_ref())).collect())
             }
-            &Value::Ext(ty, ref buf) => ValueRef::Ext(ty, buf.as_slice()),
+            Value::Ext(ty, ref buf) => ValueRef::Ext(ty, buf.as_slice()),
         }
     }
 
@@ -836,6 +849,27 @@ impl Index<usize> for Value {
     }
 }
 
+impl Index<&str> for Value {
+    type Output = Value;
+    fn index(&self, index: &str) -> &Value {
+        if let Value::Map(ref map) = *self {
+            if let Some(found) = map.iter().find(
+                |(key, _val)|  {
+                if let Value::String(ref strval) = *key {
+                    if let Some(s) = strval.as_str() {
+                        if s == index { return true; }
+                    }
+                }
+                return false;
+                })
+            {
+                return &found.1;
+            }
+        }
+        &NIL
+    }
+}
+
 impl From<bool> for Value {
     fn from(v: bool) -> Self {
         Value::Boolean(v)
@@ -962,8 +996,118 @@ impl From<Vec<(Value, Value)>> for Value {
     }
 }
 
+/// Note that an `Iterator<Item = u8>` will be collected into an
+/// [`Array`](crate::Value::Array), rather than a
+/// [`Binary`](crate::Value::Binary)
+impl<V> FromIterator<V> for Value
+where V: Into<Value> {
+  fn from_iter<I: IntoIterator<Item = V>>(iter: I) -> Self {
+    let v: Vec<Value> = iter.into_iter().map(|v| v.into()).collect();
+    Value::Array(v)
+  }
+}
+
+impl TryFrom<Value> for u64 {
+  type Error = Value;
+
+  fn try_from(val: Value) -> Result<Self, Self::Error> {
+      match val {
+        Value::Integer(n) => {
+          match n.as_u64() {
+            Some(i) => Ok(i),
+            None => Err(val)
+          }
+        }
+        v => Err(v),
+      }
+  }
+}
+
+impl TryFrom<Value> for i64 {
+  type Error = Value;
+
+  fn try_from(val: Value) -> Result<Self, Self::Error> {
+      match val {
+        Value::Integer(n) => {
+          match n.as_i64() {
+            Some(i) => Ok(i),
+            None => Err(val)
+          }
+        }
+        v => Err(v),
+      }
+  }
+}
+
+impl TryFrom<Value> for f64 {
+  type Error = Value;
+
+  fn try_from(val: Value) -> Result<Self, Self::Error> {
+      match val {
+        Value::Integer(n) => {
+          match n.as_f64() {
+            Some(i) => Ok(i),
+            None => Err(val)
+          }
+        }
+        Value::F32(n) => Ok(From::from(n)),
+        Value::F64(n) => Ok(n),
+        v => Err(v),
+      }
+  }
+}
+
+impl TryFrom<Value> for String {
+  type Error = Value;
+
+  fn try_from(val: Value) -> Result<Self, Self::Error> {
+    match val {
+      Value::String(Utf8String{ s: Ok(u)}) => {
+        Ok(u)
+      }
+      _ => Err(val)
+    }
+  }
+}
+// The following impl was left out intentionally, see
+// https://github.com/3Hren/msgpack-rust/pull/228#discussion_r359513925
+/*
+impl TryFrom<Value> for (i8, Vec<u8>) {
+  type Error = Value;
+
+  fn try_from(val: Value) -> Result<Self, Self::Error> {
+      match val {
+        Value::Ext(i, v) => Ok((i, v)),
+        v => Err(v),
+      }
+  }
+}
+*/
+
+macro_rules! impl_try_from {
+  ($t: ty, $p: ident) => {
+    impl TryFrom<Value> for $t {
+      type Error = Value;
+
+      fn try_from(val: Value) -> Result<$t, Self::Error> {
+        match val {
+          Value::$p(v) => Ok(v),
+          v => Err(v)
+        }
+      }
+    }
+  };
+}
+
+impl_try_from!(bool, Boolean);
+impl_try_from!(Vec<Value>, Array);
+impl_try_from!(Vec<(Value, Value)>, Map);
+impl_try_from!(Vec<u8>, Binary);
+impl_try_from!(f32, F32);
+impl_try_from!(Utf8String, String);
+
 impl Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             Value::Nil => Display::fmt("nil", f),
             Value::Boolean(val) => write!(f, "{}", val),
@@ -983,19 +1127,19 @@ impl Display for Value {
                 write!(f, "[{}]", res)
             }
             Value::Map(ref vec) => {
-                try!(write!(f, "{{"));
+                write!(f, "{{")?;
 
                 match vec.iter().take(1).next() {
                     Some(&(ref k, ref v)) => {
-                        try!(write!(f, "{}: {}", k, v));
+                        write!(f, "{}: {}", k, v)?;
                     }
                     None => {
-                        try!(write!(f, ""));
+                        write!(f, "")?;
                     }
                 }
 
                 for &(ref k, ref v) in vec.iter().skip(1) {
-                    try!(write!(f, ", {}: {}", k, v));
+                    write!(f, ", {}: {}", k, v)?;
                 }
 
                 write!(f, "}}")
@@ -1066,25 +1210,25 @@ impl<'a> ValueRef<'a> {
     /// assert_eq!(expected, val.to_owned());
     /// ```
     pub fn to_owned(&self) -> Value {
-        match self {
-            &ValueRef::Nil => Value::Nil,
-            &ValueRef::Boolean(val) => Value::Boolean(val),
-            &ValueRef::Integer(val) => Value::Integer(val),
-            &ValueRef::F32(val) => Value::F32(val),
-            &ValueRef::F64(val) => Value::F64(val),
-            &ValueRef::String(val) => Value::String(val.into()),
-            &ValueRef::Binary(val) => Value::Binary(val.to_vec()),
-            &ValueRef::Array(ref val) => {
+        match *self {
+            ValueRef::Nil => Value::Nil,
+            ValueRef::Boolean(val) => Value::Boolean(val),
+            ValueRef::Integer(val) => Value::Integer(val),
+            ValueRef::F32(val) => Value::F32(val),
+            ValueRef::F64(val) => Value::F64(val),
+            ValueRef::String(val) => Value::String(val.into()),
+            ValueRef::Binary(val) => Value::Binary(val.to_vec()),
+            ValueRef::Array(ref val) => {
                 Value::Array(val.iter().map(|v| v.to_owned()).collect())
             }
-            &ValueRef::Map(ref val) => {
+            ValueRef::Map(ref val) => {
                 Value::Map(val.iter().map(|&(ref k, ref v)| (k.to_owned(), v.to_owned())).collect())
             }
-            &ValueRef::Ext(ty, buf) => Value::Ext(ty, buf.to_vec()),
+            ValueRef::Ext(ty, buf) => Value::Ext(ty, buf.to_vec()),
         }
     }
 
-    pub fn index(&self, index: usize) -> &ValueRef {
+    pub fn index(&self, index: usize) -> &ValueRef<'_> {
         self.as_array().and_then(|v| v.get(index)).unwrap_or(&NIL_REF)
     }
 
@@ -1118,7 +1262,7 @@ impl<'a> ValueRef<'a> {
     /// assert_eq!(Some(&vec![ValueRef::Nil, ValueRef::Boolean(true)]), val.as_array());
     /// assert_eq!(None, ValueRef::Nil.as_array());
     /// ```
-    pub fn as_array(&self) -> Option<&Vec<ValueRef>> {
+    pub fn as_array(&self) -> Option<&Vec<ValueRef<'_>>> {
         if let ValueRef::Array(ref array) = *self {
             Some(&*array)
         } else {
@@ -1215,7 +1359,7 @@ impl<'a> From<&'a str> for ValueRef<'a> {
 
 impl<'a> From<&'a [u8]> for ValueRef<'a> {
     fn from(v: &'a [u8]) -> Self {
-        ValueRef::Binary(v.into())
+        ValueRef::Binary(v)
     }
 }
 
@@ -1225,14 +1369,79 @@ impl<'a> From<Vec<ValueRef<'a>>> for ValueRef<'a> {
     }
 }
 
+/// Note that an `Iterator<Item = u8>` will be collected into an
+/// [`Array`](crate::Value::Array), rather than a
+/// [`Binary`](crate::Value::Binary)
+impl<'a, V> FromIterator<V> for ValueRef<'a>
+where V: Into<ValueRef<'a>> {
+  fn from_iter<I: IntoIterator<Item = V>>(iter: I) -> Self {
+    let v: Vec<ValueRef<'a>> = iter.into_iter().map(|v| v.into()).collect();
+    ValueRef::Array(v)
+  }
+}
+
 impl<'a> From<Vec<(ValueRef<'a>, ValueRef<'a>)>> for ValueRef<'a> {
     fn from(v: Vec<(ValueRef<'a>, ValueRef<'a>)>) -> Self {
         ValueRef::Map(v)
     }
 }
 
+impl<'a> TryFrom<ValueRef<'a>> for u64 {
+  type Error = ValueRef<'a>;
+
+  fn try_from(val: ValueRef<'a>) -> Result<Self, Self::Error> {
+      match val {
+        ValueRef::Integer(n) => {
+          match n.as_u64() {
+            Some(i) => Ok(i),
+            None => Err(val)
+          }
+        }
+        v => Err(v),
+      }
+  }
+}
+
+// The following impl was left out intentionally, see
+// https://github.com/3Hren/msgpack-rust/pull/228#discussion_r359513925
+/*
+impl<'a> TryFrom<ValueRef<'a>> for (i8, &'a[u8]) {
+  type Error = ValueRef<'a>;
+
+  fn try_from(val: ValueRef<'a>) -> Result<Self, Self::Error> {
+      match val {
+        ValueRef::Ext(i, v) => Ok((i, v)),
+        v => Err(v),
+      }
+  }
+}
+*/
+
+macro_rules! impl_try_from_ref {
+  ($t: ty, $p: ident) => {
+    impl<'a> TryFrom<ValueRef<'a>> for $t {
+      type Error = ValueRef<'a>;
+
+      fn try_from(val: ValueRef<'a>) -> Result<$t, Self::Error> {
+        match val {
+          ValueRef::$p(v) => Ok(v),
+          v => Err(v)
+        }
+      }
+    }
+  };
+}
+
+impl_try_from_ref!(bool, Boolean);
+impl_try_from_ref!(Vec<ValueRef<'a>>, Array);
+impl_try_from_ref!(Vec<(ValueRef<'a>, ValueRef<'a>)>, Map);
+impl_try_from_ref!(&'a [u8], Binary);
+impl_try_from_ref!(f32, F32);
+impl_try_from_ref!(Utf8StringRef<'a>, String);
+
 impl<'a> Display for ValueRef<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             ValueRef::Nil => write!(f, "nil"),
             ValueRef::Boolean(val) => write!(f, "{}", val),
@@ -1250,19 +1459,19 @@ impl<'a> Display for ValueRef<'a> {
                 write!(f, "[{}]", res)
             }
             ValueRef::Map(ref vec) => {
-                try!(write!(f, "{{"));
+                write!(f, "{{")?;
 
                 match vec.iter().take(1).next() {
                     Some(&(ref k, ref v)) => {
-                        try!(write!(f, "{}: {}", k, v));
+                        write!(f, "{}: {}", k, v)?;
                     }
                     None => {
-                        try!(write!(f, ""));
+                        write!(f, "")?;
                     }
                 }
 
                 for &(ref k, ref v) in vec.iter().skip(1) {
-                    try!(write!(f, ", {}: {}", k, v));
+                    write!(f, ", {}: {}", k, v)?;
                 }
 
                 write!(f, "}}")

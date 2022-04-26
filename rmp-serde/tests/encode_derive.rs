@@ -1,12 +1,10 @@
-extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate rmp;
+
 extern crate rmp_serde as rmps;
 
 use serde::Serialize;
-use rmps::Serializer;
-use rmps::encode::{Ext, UnderlyingWrite};
+use crate::rmps::Serializer;
 
 #[test]
 fn pass_unit_struct() {
@@ -164,8 +162,8 @@ fn serialize_struct_variant_as_map() {
         .with_struct_map();
     Enum::V1 { f1: 42 }.serialize(&mut se).unwrap();
 
-    // Expect: [0, {"f1": 42}].
-    assert_eq!(vec![0x92, 0x00, 0x81, 0xa2, 0x66, 0x31, 0x2a], se.into_inner());
+    // Expect: {0 => {"f1": 42}}.
+    assert_eq!(vec![0x81, 0x00, 0x81, 0xa2, 0x66, 0x31, 0x2a], se.into_inner());
 }
 
 #[test]

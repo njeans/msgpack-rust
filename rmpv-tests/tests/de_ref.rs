@@ -1,9 +1,6 @@
-extern crate serde;
-extern crate serde_bytes;
 #[macro_use]
 extern crate serde_derive;
 extern crate rmp_serde as rmps;
-extern crate rmpv;
 
 use std::collections::BTreeMap;
 
@@ -15,11 +12,11 @@ use rmpv::ext::deserialize_from;
 
 /// Tests that a `ValueRef` is properly decoded from bytes using two different mechanisms: direct
 /// deserialization using `rmp::decode::read_value_ref` and using `serde`.
-fn test_decode(buf: &[u8], v: ValueRef) {
-    let val0: ValueRef = decode::read_value_ref(&mut &buf[..]).unwrap();
+fn test_decode(buf: &[u8], v: ValueRef<'_>) {
+    let val0: ValueRef<'_> = decode::read_value_ref(&mut &buf[..]).unwrap();
     assert_eq!(v, val0);
 
-    let val1: ValueRef = rmps::from_slice(buf).unwrap();
+    let val1: ValueRef<'_> = rmps::from_slice(buf).unwrap();
     assert_eq!(v, val1);
 }
 
@@ -146,7 +143,10 @@ fn pass_bin_from_value() {
     let v: &[u8] = deserialize_from(ValueRef::from(&buf[..])).unwrap();
     assert_eq!(&[0, 1, 2][..], v);
 
-    assert_eq!(ByteBuf::from(&[0, 1, 2][..]), deserialize_from(ValueRef::from(&[0, 1, 2][..])).unwrap());
+    assert_eq!(
+        ByteBuf::from(&[0, 1, 2][..]),
+        deserialize_from::<ByteBuf, _>(ValueRef::from(&[0, 1, 2][..])).unwrap()
+    );
 }
 
 #[test]
@@ -255,4 +255,49 @@ fn pass_from_slice() {
 
     assert_eq!(ValueRef::Array(vec![ValueRef::from("John"), ValueRef::from("Smith"), ValueRef::from(42)]),
         rmps::from_slice(&buf[..]).unwrap());
+}
+
+#[test]
+fn pass_from_ext() {
+    #[derive(Debug, PartialEq)]
+    struct ExtRefStruct<'a>(i8, &'a [u8]);
+
+    struct ExtRefStructVisitor;
+
+    impl<'de> serde::de::Deserialize<'de> for ExtRefStruct<'de> {
+        fn deserialize<D>(deserializer: D) -> Result<ExtRefStruct<'de>, D::Error>
+            where D: serde::Deserializer<'de>,
+        {
+            let visitor = ExtRefStructVisitor;
+            deserializer.deserialize_any(visitor)
+        }
+    }
+
+    impl<'de> serde::de::Visitor<'de> for ExtRefStructVisitor {
+        type Value = ExtRefStruct<'de>;
+
+        fn expecting(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(fmt, "a sequence of tag & binary")
+        }
+
+        fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where D: serde::de::Deserializer<'de>,
+        {
+            deserializer.deserialize_tuple(2, self)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where A: serde::de::SeqAccess<'de>
+        {
+            let tag: i8 = seq.next_element()?
+                .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+            let data: &[u8] = seq.next_element()?
+                .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+
+            Ok(ExtRefStruct(tag, data))
+        }
+    }
+
+    assert_eq!(ExtRefStruct(42, &[255]),
+        deserialize_from(ValueRef::Ext(42, &[255])).unwrap());
 }

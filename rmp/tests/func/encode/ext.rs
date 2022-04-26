@@ -1,5 +1,5 @@
-use msgpack::Marker;
-use msgpack::encode::*;
+use crate::msgpack::Marker;
+use crate::msgpack::encode::*;
 
 #[test]
 fn pass_pack_meta_fix1() {
@@ -29,6 +29,13 @@ fn pass_pack_meta_fix4() {
 }
 
 #[test]
+fn pass_pack_meta_fix4_timesamp() {
+    let mut buf = [0x00, 0x00];
+    assert_eq!(Marker::FixExt4, write_ext_meta(&mut &mut buf[..], 4, -1).unwrap());
+    assert_eq!([0xd6, 0xff], buf);
+}
+
+#[test]
 fn pass_pack_meta_fix8() {
     let mut buf = [0x00, 0x00];
 
@@ -36,7 +43,6 @@ fn pass_pack_meta_fix8() {
 
     assert_eq!([0xd7, 0x10], buf);
 }
-
 
 #[test]
 fn pass_pack_meta_fix16() {

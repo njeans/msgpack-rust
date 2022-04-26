@@ -5,6 +5,9 @@ use std::fmt::{self, Display, Formatter};
 use std::io::{self, Cursor, ErrorKind, Read};
 use std::str::{self, Utf8Error};
 
+use std::string::{ToString, String};
+use std::vec::Vec;
+
 use byteorder::{self, ReadBytesExt};
 
 use serde;
@@ -13,6 +16,8 @@ use serde::de::{self, Deserialize, DeserializeOwned, DeserializeSeed, Visitor};
 use rmp;
 use rmp::Marker;
 use rmp::decode::{self, MarkerReadError, DecodeStringError, ValueReadError, NumValueReadError};
+
+use crate::MSGPACK_EXT_STRUCT_NAME;
 
 /// Enum representing errors that can occur while decoding MessagePack data.
 #[derive(Debug)]
@@ -46,7 +51,7 @@ impl error::Error for Error {
         "error while decoding value"
     }
 
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&dyn error::Error> {
         match *self {
             Error::TypeMismatch(..) => None,
             Error::InvalidMarkerRead(ref err) => Some(err),
@@ -68,8 +73,24 @@ impl de::Error for Error {
 }
 
 impl Display for Error {
-    fn fmt(&self, fmt: &mut Formatter) -> Result<(), fmt::Error> {
-        error::Error::description(self).fmt(fmt)
+    fn fmt(&self, fmt: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        match *self {
+            Error::InvalidMarkerRead(ref err) => write!(fmt, "IO error while reading marker: {}", err),
+            Error::InvalidDataRead(ref err) => write!(fmt, "IO error while reading data: {}", err),
+            Error::TypeMismatch(ref actual_marker) => {
+                write!(fmt, "wrong msgpack marker {:?}", actual_marker)
+            }
+            Error::OutOfRange => fmt.write_str("numeric cast found out of range"),
+            Error::LengthMismatch(expected_length) => write!(
+                fmt,
+                "array had incorrect length, expected {}",
+                expected_length
+            ),
+            Error::Uncategorized(ref msg) => write!(fmt, "uncategorized error: {}", msg),
+            Error::Syntax(ref msg) => fmt.write_str(msg),
+            Error::Utf8Error(ref err) => write!(fmt, "string found to be invalid utf8: {}", err),
+            Error::DepthLimitExceeded => fmt.write_str("depth limit exceeded"),
+        }
     }
 }
 
@@ -109,7 +130,7 @@ impl From<NumValueReadError> for Error {
 }
 
 impl<'a> From<DecodeStringError<'a>> for Error {
-    fn from(err: DecodeStringError) -> Error {
+    fn from(err: DecodeStringError<'_>) -> Error {
         match err {
             DecodeStringError::InvalidMarkerRead(err) => Error::InvalidMarkerRead(err),
             DecodeStringError::InvalidDataRead(err) => Error::InvalidDataRead(err),
@@ -233,6 +254,13 @@ impl<'de, R: ReadSlice<'de>> Deserializer<R> {
         self.rd.read_slice(len as usize).map_err(Error::InvalidDataRead)
     }
 
+    fn read_ext<V>(&mut self, len: u32, visitor: V) -> Result<V::Value, Error>
+        where V: Visitor<'de>
+    {
+        let ext_de = ExtDeserializer::new(self, len);
+        visitor.visit_newtype_struct(ext_de)
+    }
+
     fn read_array<V>(&mut self, len: u32, visitor: V) -> Result<V::Value, Error>
         where V: Visitor<'de>
     {
@@ -265,6 +293,99 @@ fn read_u16<R: Read>(rd: &mut R) -> Result<u16, Error> {
 
 fn read_u32<R: Read>(rd: &mut R) -> Result<u32, Error> {
     rd.read_u32::<byteorder::BigEndian>().map_err(Error::InvalidDataRead)
+}
+
+#[derive(Debug)]
+enum ExtDeserializerState {
+    New,
+    ReadTag,
+    ReadBinary
+}
+
+#[derive(Debug)]
+struct ExtDeserializer<'a, R> {
+    rd: &'a mut R,
+    len: u32,
+    state: ExtDeserializerState
+}
+
+impl<'de, 'a, R: ReadSlice<'de> + 'a> ExtDeserializer<'a, R> {
+    fn new(d: &'a mut Deserializer<R>, len: u32) -> Self {
+        ExtDeserializer {
+            rd: &mut d.rd,
+            len,
+            state: ExtDeserializerState::New,
+        }
+    }
+}
+
+impl<'de, 'a, R: ReadSlice<'de> + 'a> de::Deserializer<'de> for ExtDeserializer<'a, R> {
+    type Error = Error;
+
+    #[inline]
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where V: Visitor<'de>
+    {
+        visitor.visit_seq(self)
+    }
+
+    forward_to_deserialize_any! {
+        bool u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 char str string unit option
+        seq bytes byte_buf map unit_struct newtype_struct
+        struct identifier tuple enum ignored_any tuple_struct
+    }
+}
+
+impl<'de, 'a, R: ReadSlice<'de> + 'a> de::SeqAccess<'de> for ExtDeserializer<'a, R> {
+    type Error = Error;
+
+    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Error>
+    where
+        T: DeserializeSeed<'de>,
+    {
+        match self.state {
+            ExtDeserializerState::New | ExtDeserializerState::ReadTag => Ok(Some(seed.deserialize(self)?)),
+            ExtDeserializerState::ReadBinary => Ok(None)
+        }
+    }
+}
+
+
+/// Deserializer for Ext SeqAccess
+impl<'de, 'a, R: ReadSlice<'de> + 'a> de::Deserializer<'de> for &mut ExtDeserializer<'a, R> {
+    type Error = Error;
+
+    #[inline]
+    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where V: Visitor<'de>
+    {
+        match self.state {
+            ExtDeserializerState::New => {
+                let tag = rmp::decode::read_data_i8(self.rd)?;
+                self.state = ExtDeserializerState::ReadTag;
+                visitor.visit_i8(tag)
+            }
+            ExtDeserializerState::ReadTag => {
+                let data = self.rd.read_slice(self.len as usize).map_err(Error::InvalidDataRead)?;
+                self.state = ExtDeserializerState::ReadBinary;
+                match data {
+                    Reference::Borrowed(bytes) => {
+                        visitor.visit_borrowed_bytes(bytes)
+                    }
+                    Reference::Copied(bytes) => {
+                        visitor.visit_bytes(bytes)
+                    }
+                }
+            }
+            ExtDeserializerState::ReadBinary => unreachable!()
+        }
+    }
+
+    forward_to_deserialize_any! {
+        bool u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 char str string unit option
+        seq bytes byte_buf map unit_struct newtype_struct
+        tuple_struct struct identifier tuple enum ignored_any
+    }
 }
 
 impl<'de, 'a, R: ReadSlice<'de>> serde::Deserializer<'de> for &'a mut Deserializer<R> {
@@ -343,8 +464,39 @@ impl<'de, 'a, R: ReadSlice<'de>> serde::Deserializer<'de> for &'a mut Deserializ
                 let len = read_u32(&mut self.rd)?;
                 self.read_bytes(len, visitor)
             }
+            Marker::FixExt1 => {
+                let len = 1 as usize;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::FixExt2 => {
+                let len = 2 as usize;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::FixExt4 => {
+                let len = 4 as usize;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::FixExt8 => {
+                let len = 8 as usize;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::FixExt16 => {
+                let len = 16 as usize;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::Ext8 => {
+                let len = read_u8(&mut self.rd)?;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::Ext16 => {
+                let len = read_u16(&mut self.rd)?;
+                self.read_ext(len as u32, visitor)
+            }
+            Marker::Ext32 => {
+                let len = read_u32(&mut self.rd)?;
+                self.read_ext(len as u32, visitor)
+            }
             Marker::Reserved => Err(Error::TypeMismatch(Marker::Reserved)),
-            marker => Err(Error::TypeMismatch(marker)),
         }
     }
 
@@ -364,27 +516,140 @@ impl<'de, 'a, R: ReadSlice<'de>> serde::Deserializer<'de> for &'a mut Deserializ
     fn deserialize_enum<V>(self, _name: &str, _variants: &[&str], visitor: V) -> Result<V::Value, Error>
         where V: Visitor<'de>
     {
-        match decode::read_map_len(&mut self.rd)? {
+        let marker = match self.marker.take() {
+            Some(marker) => marker,
+            None => rmp::decode::read_marker(&mut self.rd)?,
+        };
+
+        match rmp::decode::marker_to_len(&mut self.rd, marker)? {
             1 => visitor.visit_enum(VariantAccess::new(self)),
             n => Err(Error::LengthMismatch(n as u32)),
         }
     }
 
-    fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value, Error>
+    fn deserialize_newtype_struct<V>(self, name: &'static str, visitor: V) -> Result<V::Value, Error>
         where V: Visitor<'de>
     {
+        if name == MSGPACK_EXT_STRUCT_NAME {
+            let marker = match self.marker.take() {
+                Some(marker) => marker,
+                None => rmp::decode::read_marker(&mut self.rd)?,
+            };
+            let len = match marker {
+                Marker::FixExt1 => {
+                    1 as u32
+                }
+                Marker::FixExt2 => {
+                    2 as u32
+                }
+                Marker::FixExt4 => {
+                    4 as u32
+                }
+                Marker::FixExt8 => {
+                    8 as u32
+                }
+                Marker::FixExt16 => {
+                    16 as u32
+                }
+                Marker::Ext8 => {
+                    read_u8(&mut self.rd)? as u32
+                }
+                Marker::Ext16 => {
+                    read_u16(&mut self.rd)? as u32
+                }
+                Marker::Ext32 => {
+                    read_u32(&mut self.rd)? as u32
+                }
+                _ => {
+                    return Err(Error::TypeMismatch(marker))
+                }
+            };
+
+            let ext_de = ExtDeserializer::new(self, len);
+            return visitor.visit_newtype_struct(ext_de);
+        }
+
         visitor.visit_newtype_struct(self)
     }
 
+    fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value, Self::Error>
+        where V: Visitor<'de>
+    {
+        // We need to special case this so that [] is treated as a unit struct when asked for,
+        // but as a sequence otherwise. This is because we serialize unit structs as [] rather
+        // than as 'nil'.
+        let marker = match self.marker.take() {
+            Some(marker) => marker,
+            None => rmp::decode::read_marker(&mut self.rd)?,
+        };
+        match marker {
+            Marker::Null | Marker::FixArray(0) => visitor.visit_unit(),
+            marker => {
+                self.marker = Some(marker);
+                self.deserialize_any(visitor)
+            }
+        }
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where V: Visitor<'de>
+    {
+        // This special case allows us to decode some integer types as floats when safe, and
+        // asked for.
+        //
+        // This allows interoperability with msgpack-lite, which performs an optimization of
+        // storing rounded floats as integers.
+        let marker = match self.marker.take() {
+            Some(marker) => marker,
+            None => rmp::decode::read_marker(&mut self.rd)?,
+        };
+        match marker {
+            Marker::U8 => visitor.visit_f32(rmp::decode::read_data_u8(&mut self.rd)?.into()),
+            Marker::U16 => visitor.visit_f32(rmp::decode::read_data_u16(&mut self.rd)?.into()),
+            Marker::I8 => visitor.visit_f32(rmp::decode::read_data_i8(&mut self.rd)?.into()),
+            Marker::I16 => visitor.visit_f32(rmp::decode::read_data_i16(&mut self.rd)?.into()),
+            Marker::F32 => visitor.visit_f32(rmp::decode::read_data_f32(&mut self.rd)?),
+            marker => {
+                self.marker = Some(marker);
+                self.deserialize_any(visitor)
+            }
+        }
+    }
+
+    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+        where V: Visitor<'de>
+    {
+        // This special case allows us to decode some integer types as floats when safe, and
+        // asked for. This is here to be consistent with 'f32'.
+        let marker = match self.marker.take() {
+            Some(marker) => marker,
+            None => rmp::decode::read_marker(&mut self.rd)?,
+        };
+        match marker {
+            Marker::U8 => visitor.visit_f64(rmp::decode::read_data_u8(&mut self.rd)?.into()),
+            Marker::U16 => visitor.visit_f64(rmp::decode::read_data_u16(&mut self.rd)?.into()),
+            Marker::U32 => visitor.visit_f64(rmp::decode::read_data_u32(&mut self.rd)?.into()),
+            Marker::I8 => visitor.visit_f64(rmp::decode::read_data_i8(&mut self.rd)?.into()),
+            Marker::I16 => visitor.visit_f64(rmp::decode::read_data_i16(&mut self.rd)?.into()),
+            Marker::I32 => visitor.visit_f64(rmp::decode::read_data_i32(&mut self.rd)?.into()),
+            Marker::F32 => visitor.visit_f64(rmp::decode::read_data_f32(&mut self.rd)?.into()),
+            Marker::F64 => visitor.visit_f64(rmp::decode::read_data_f64(&mut self.rd)?),
+            marker => {
+                self.marker = Some(marker);
+                self.deserialize_any(visitor)
+            }
+        }
+    }
+
     forward_to_deserialize_any! {
-        bool u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 char
-        str string bytes byte_buf unit unit_struct seq map
-        tuple_struct struct identifier tuple
+        bool u8 u16 u32 u64 i8 i16 i32 i64 char
+        str string bytes byte_buf unit seq map
+        struct identifier tuple tuple_struct
         ignored_any
     }
 }
 
-struct SeqAccess<'a, R: 'a> {
+struct SeqAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     left: usize,
 }
@@ -392,7 +657,7 @@ struct SeqAccess<'a, R: 'a> {
 impl<'a, R: 'a> SeqAccess<'a, R> {
     fn new(de: &'a mut Deserializer<R>, len: usize) -> Self {
         SeqAccess {
-            de: de,
+            de,
             left: len,
         }
     }
@@ -417,7 +682,7 @@ impl<'de, 'a, R: ReadSlice<'de> + 'a> de::SeqAccess<'de> for SeqAccess<'a, R> {
     }
 }
 
-struct MapAccess<'a, R: 'a> {
+struct MapAccess<'a, R> {
     de: &'a mut Deserializer<R>,
     left: usize,
 }
@@ -425,7 +690,7 @@ struct MapAccess<'a, R: 'a> {
 impl<'a, R: 'a> MapAccess<'a, R> {
     fn new(de: &'a mut Deserializer<R>, len: usize) -> Self {
         MapAccess {
-            de: de,
+            de,
             left: len,
         }
     }
@@ -456,14 +721,14 @@ impl<'de, 'a, R: ReadSlice<'de> + 'a> de::MapAccess<'de> for MapAccess<'a, R> {
     }
 }
 
-struct VariantAccess<'a, R: 'a> {
+struct VariantAccess<'a, R> {
     de: &'a mut Deserializer<R>,
 }
 
 impl<'a, R: 'a> VariantAccess<'a, R> {
     pub fn new(de: &'a mut Deserializer<R>) -> Self {
         VariantAccess {
-            de: de,
+            de,
         }
     }
 }
@@ -475,11 +740,7 @@ impl<'de, 'a, R: ReadSlice<'de>> de::EnumAccess<'de> for VariantAccess<'a, R> {
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self), Error>
         where V: de::DeserializeSeed<'de>,
     {
-        use serde::de::IntoDeserializer;
-
-        let idx: u32 = serde::Deserialize::deserialize(&mut *self.de)?;
-        let val: Result<_, Error> = seed.deserialize(idx.into_deserializer());
-        Ok((val?, self))
+        Ok((seed.deserialize(&mut *self.de)?, self))
     }
 }
 
@@ -537,7 +798,7 @@ pub struct ReadReader<R: Read> {
 impl<R: Read> ReadReader<R> {
     fn new(rd: R) -> Self {
         ReadReader {
-            rd: rd,
+            rd,
             buf: Vec::with_capacity(128),
         }
     }
@@ -567,7 +828,7 @@ impl<R: Read> Read for ReadReader<R> {
 
 /// Borrowed reader wrapper.
 #[derive(Debug)]
-pub struct ReadRefReader<'a, R: ?Sized + 'a> {
+pub struct ReadRefReader<'a, R: ?Sized> {
     rd: &'a R,
     buf: &'a [u8],
 }
@@ -575,7 +836,7 @@ pub struct ReadRefReader<'a, R: ?Sized + 'a> {
 impl<'a, T: AsRef<[u8]> + ?Sized> ReadRefReader<'a, T> {
     fn new(rd: &'a T) -> Self {
         Self {
-            rd: rd,
+            rd,
             buf: rd.as_ref()
         }
     }

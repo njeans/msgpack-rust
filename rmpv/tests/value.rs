@@ -1,5 +1,3 @@
-extern crate rmpv;
-
 use rmpv::Value;
 
 #[test]
@@ -125,6 +123,24 @@ fn from_f64() {
 }
 
 #[test]
+fn from_iterator() {
+    let v: Vec<u8> = vec![0u8, 1u8, 2u8];
+    let w: Value = v.into_iter().collect();
+
+    let w2 = Value::Array(vec![
+                         Value::from(0u8),
+                         Value::from(1u8),
+                         Value::from(2u8)
+                         ]); 
+
+    assert_eq!(w, w2);
+
+    let w3 = Value::Binary(vec![0u8, 1u8, 2u8]);
+
+    assert!(w != w3);
+}
+
+#[test]
 fn is_nil() {
     assert!(Value::Nil.is_nil());
     assert!(!Value::Boolean(true).is_nil());
@@ -147,4 +163,36 @@ fn monadic_index() {
     assert!(val[0][0][0].is_nil());
     assert!(val[2].is_nil());
     assert!(val[1][2][3][4][5].is_nil());
+}
+
+#[test]
+fn index_into_map() {
+    let val = Value::Map(vec![
+        ( Value::String("a".into()), Value::from(1) ),
+        ( Value::String("b".into()), Value::Array(vec![
+            Value::from(3),
+            Value::from(4),
+            Value::from(5)
+        ])),
+        ( Value::String("c".into()), Value::Map(vec![
+            ( Value::String("d".into()), Value::from(8) ),
+            ( Value::String("e".into()), Value::from(9) )
+        ]))
+    ]);        
+    assert_eq!(1, val["a"].as_i64().unwrap());
+    assert_eq!(5, val["b"][2].as_i64().unwrap());
+    assert_eq!(9, val["c"]["e"].as_i64().unwrap());
+    assert!(val["b"][3].is_nil());
+    assert!(val["d"][4].is_nil());
+}
+
+#[test]
+fn try_from_val() {
+  use rmpv::Utf8String;
+  use std::convert::TryInto;
+
+  assert_eq!(false, Value::Boolean(false).try_into().unwrap());
+  assert_eq!(Utf8String::from("spook"), Value::from("spook").try_into().unwrap());
+  assert_eq!(String::from("spook"), TryInto::<String>::try_into(Value::from("spook")).unwrap());
+  assert_eq!(vec![0], TryInto::<Vec<u8>>::try_into(Value::Binary(vec![0u8])).unwrap());
 }
